@@ -250,11 +250,47 @@ h1{font-size:32px}
 <div class="toast" id="toast" role="status"></div>
 <script>
 const LANGUAGES=[["Arabic","ar"],["Bengali","bn"],["Chinese (Simplified)","zh"],["Dutch","nl"],["English","en"],["French","fr"],["German","de"],["Hindi","hi"],["Indonesian","id"],["Italian","it"],["Japanese","ja"],["Korean","ko"],["Persian","fa"],["Polish","pl"],["Portuguese","pt"],["Punjabi","pa"],["Russian","ru"],["Spanish","es"],["Swahili","sw"],["Tamil","ta"],["Thai","th"],["Turkish","tr"],["Ukrainian","uk"],["Urdu","ur"],["Vietnamese","vi"]];
+
+const BCP47_MAP = {
+  ar: "ar-SA",
+  bn: "bn-BD",
+  zh: "zh-CN",
+  nl: "nl-NL",
+  en: "en-US",
+  fr: "fr-FR",
+  de: "de-DE",
+  hi: "hi-IN",
+  id: "id-ID",
+  it: "it-IT",
+  ja: "ja-JP",
+  ko: "ko-KR",
+  fa: "fa-IR",
+  pl: "pl-PL",
+  pt: "pt-PT",
+  pa: "pa-IN",
+  ru: "ru-RU",
+  es: "es-ES",
+  sw: "sw-KE",
+  ta: "ta-IN",
+  th: "th-TH",
+  tr: "tr-TR",
+  uk: "uk-UA",
+  ur: "ur-PK",
+  vi: "vi-VN",
+  auto: "en-US"
+};
+
+function getLanguageName(code) {
+  if (!code || code === "auto") return "auto";
+  const item = LANGUAGES.find(x => x[1] === code);
+  return item ? item[0] : code;
+}
+
 const $=id=>document.getElementById(id);let lastTranslation="",selectedImage=null;
 function fillLanguages(select,includeAuto=false){select.innerHTML="";if(includeAuto){let o=document.createElement("option");o.value="auto";o.textContent="Detect language";select.append(o)}LANGUAGES.forEach(([name,code])=>{let o=document.createElement("option");o.value=code;o.textContent=name;select.append(o)})}
 fillLanguages($("sourceLang"),true);fillLanguages($("targetLang"));fillLanguages($("ocrSource"),true);fillLanguages($("ocrTarget"));
 $("sourceLang").value="auto";$("targetLang").value="ur";$("ocrSource").value="auto";$("ocrTarget").value="ur";$("year").textContent=new Date().getFullYear();
-function toast(msg){$("toast").textContent=msg;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),2300)}
+function toast(msg){$("toast").textContent=msg;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),2800)}
 function showPage(name){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id===name));document.querySelectorAll("[data-page]").forEach(b=>b.classList.toggle("active",b.dataset.page===name));$("mobileMenu").classList.remove("open");$("menuToggle").setAttribute("aria-expanded","false");window.scrollTo({top:0,behavior:"smooth"});location.hash=name}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>showPage(b.dataset.page)));
 $("menuToggle").addEventListener("click",()=>{let open=$("mobileMenu").classList.toggle("open");$("menuToggle").setAttribute("aria-expanded",String(open));$("menuToggle").textContent=open?"×":"☰"});
@@ -265,20 +301,391 @@ $("swapLang").addEventListener("click",()=>{if($("sourceLang").value==="auto"){t
 $("clearBtn").addEventListener("click",()=>{$("sourceText").value="";$("charCount").textContent="0 / 5000";$("output").textContent="Your translation will appear here...";$("output").classList.add("placeholder");$("resultStatus").textContent="Ready";lastTranslation=""});
 async function copyText(text){if(!text){toast("Nothing to copy.");return}try{await navigator.clipboard.writeText(text);toast("Copied to clipboard.")}catch(e){toast("Clipboard is not available in this browser.")}}
 $("copyBtn").addEventListener("click",()=>copyText(lastTranslation));$("pasteBtn").addEventListener("click",async()=>{try{$("sourceText").value=await navigator.clipboard.readText();$("sourceText").dispatchEvent(new Event("input"));}catch(e){toast("Please paste using your device keyboard.")}});
-$("listenBtn").addEventListener("click",()=>{if(!lastTranslation)return toast("Translate some text first.");if(!("speechSynthesis"in window))return toast("Speech is not supported in this browser.");speechSynthesis.cancel();let u=new SpeechSynthesisUtterance(lastTranslation);u.lang=$("targetLang").value;speechSynthesis.speak(u)});
-$("micBtn").addEventListener("click",()=>{let SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return toast("Voice input is not supported in this browser.");let rec=new SR();rec.lang=$("sourceLang").value==="auto"?"en-US":$("sourceLang").value;rec.onresult=e=>{$("sourceText").value=e.results[0][0].transcript;$("sourceText").dispatchEvent(new Event("input"))};rec.onerror=()=>toast("Could not capture speech. Try again.");rec.start();toast("Listening…")});
-async function translateText(text,from,to){const res=await fetch("/api/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,source:from,target:to})});if(!res.ok)throw new Error("Translation service returned an error ("+res.status+").");const data=await res.json();const result=data.translation||data.translatedText||data.text;if(typeof result!=="string"||!result.trim())throw new Error("The translation service returned an empty result.");return result}
-$("translateBtn").addEventListener("click",async()=>{let text=$("sourceText").value.trim();if(!text)return toast("Enter some text to translate.");$("translateBtn").disabled=true;$("translateBtn").textContent="Translating…";$("resultStatus").textContent="Working";try{lastTranslation=await translateText(text,$("sourceLang").value,$("targetLang").value);$("output").textContent=lastTranslation;$("output").classList.remove("placeholder");$("resultStatus").textContent="Complete";toast("Translation complete.")}catch(e){$("resultStatus").textContent="Unavailable";toast(e.message.includes("Failed to fetch")?"Translation service is not connected yet.":e.message)}finally{$("translateBtn").disabled=false;$("translateBtn").textContent="Translate text  →"}});
+
+$("listenBtn").addEventListener("click",()=>{
+  if(!lastTranslation)return toast("Translate some text first.");
+  if(!("speechSynthesis"in window))return toast("Speech is not supported in this browser.");
+  speechSynthesis.cancel();
+  let u=new SpeechSynthesisUtterance(lastTranslation);
+  const targetCode=$("targetLang").value;
+  u.lang=BCP47_MAP[targetCode]||"en-US";
+  speechSynthesis.speak(u);
+});
+
+let mediaRecorder=null;
+let audioChunks=[];
+let mediaStream=null;
+let isRecording=false;
+
+function stopAudioRecording(){
+  if(mediaRecorder&&mediaRecorder.state!=="inactive"){
+    mediaRecorder.stop();
+  }
+}
+
+$("micBtn").addEventListener("click",async()=>{
+  if(isRecording){
+    stopAudioRecording();
+    return;
+  }
+
+  const hasMediaRecorder=typeof window!=="undefined"&&navigator.mediaDevices&&typeof navigator.mediaDevices.getUserMedia==="function"&&typeof window.MediaRecorder==="function";
+  if(hasMediaRecorder){
+    try{
+      mediaStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    }catch(err){
+      const errName=err&&err.name;
+      if(errName==="NotAllowedError"||errName==="PermissionDeniedError"){
+        return toast("Microphone permission denied.");
+      }
+      return toast(err.message||"Could not access microphone.");
+    }
+
+    let mimeType="audio/webm";
+    if(MediaRecorder.isTypeSupported("audio/webm;codecs=opus")){
+      mimeType="audio/webm;codecs=opus";
+    }else if(MediaRecorder.isTypeSupported("audio/mp4")){
+      mimeType="audio/mp4";
+    }else if(MediaRecorder.isTypeSupported("audio/ogg")){
+      mimeType="audio/ogg";
+    }else if(MediaRecorder.isTypeSupported("audio/wav")){
+      mimeType="audio/wav";
+    }
+
+    audioChunks=[];
+    try{
+      mediaRecorder=new MediaRecorder(mediaStream,mimeType?{mimeType}:undefined);
+    }catch(e){
+      mediaRecorder=new MediaRecorder(mediaStream);
+    }
+
+    mediaRecorder.ondataavailable=e=>{
+      if(e.data&&e.data.size>0)audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop=async()=>{
+      isRecording=false;
+      $("micBtn").textContent="🎙 Speak";
+      if(mediaStream){
+        mediaStream.getTracks().forEach(t=>t.stop());
+        mediaStream=null;
+      }
+      if(!audioChunks.length){
+        toast("No audio was recorded.");
+        return;
+      }
+      const recordedBlob=new Blob(audioChunks,{type:mediaRecorder.mimeType||mimeType||"audio/webm"});
+      if(recordedBlob.size===0){
+        toast("Recorded audio was empty.");
+        return;
+      }
+      toast("Processing speech…");
+      try{
+        const reader=new FileReader();
+        const base64Promise=new Promise((resolve,reject)=>{
+          reader.onloadend=()=>{
+            const res=reader.result;
+            if(typeof res==="string"){
+              resolve(res.split(",")[1]||"");
+            }else{
+              reject(new Error("Failed to process recorded audio."));
+            }
+          };
+          reader.onerror=()=>reject(new Error("Failed to read audio data."));
+        });
+        reader.readAsDataURL(recordedBlob);
+        const audioBase64=await base64Promise;
+        const langCode=$("sourceLang").value;
+        const langName=getLanguageName(langCode);
+
+        const resp=await fetch("/api/speech-to-text",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            audioBase64,
+            mimeType:recordedBlob.type||"audio/webm",
+            language:langName
+          })
+        });
+
+        const data=await resp.json().catch(()=>null);
+        if(!resp.ok){
+          throw new Error(data?.error||"Speech-to-text service returned an error ("+resp.status+").");
+        }
+        const transcribed=data?.text?.trim();
+        if(!transcribed){
+          throw new Error("No speech was detected in this audio recording.");
+        }
+        $("sourceText").value=transcribed;
+        $("sourceText").dispatchEvent(new Event("input"));
+        toast("Speech transcribed.");
+      }catch(err){
+        toast(err.message||"Failed to transcribe speech.");
+      }
+    };
+
+    mediaRecorder.start();
+    isRecording=true;
+    $("micBtn").textContent="⏹ Stop";
+    toast("Listening…");
+    return;
+  }
+
+  // Fallback: browser SpeechRecognition
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR)return toast("Voice input is not supported in this browser.");
+  const rec=new SR();
+  const sourceCode=$("sourceLang").value;
+  rec.lang=BCP47_MAP[sourceCode]||"en-US";
+  rec.onresult=e=>{
+    $("sourceText").value=e.results[0][0].transcript;
+    $("sourceText").dispatchEvent(new Event("input"));
+    toast("Speech captured.");
+  };
+  rec.onerror=e=>{
+    if(e.error==="not-allowed"){
+      toast("Microphone permission denied.");
+    }else{
+      toast("Voice input error: "+(e.error||"unknown"));
+    }
+  };
+  try{
+    rec.start();
+    toast("Listening…");
+  }catch(err){
+    toast(err.message||"Could not start voice recognition.");
+  }
+});
+
+async function translateText(text,from,to){
+  if(text.length>2000){
+    throw new Error("Text exceeds 2000 characters limit.");
+  }
+  const sourceName=getLanguageName(from);
+  const targetName=getLanguageName(to);
+  const res=await fetch("/api/translate",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({text,source:sourceName,target:targetName})
+  });
+  const data=await res.json().catch(()=>null);
+  if(!res.ok){
+    throw new Error(data?.error||"Translation service returned an error ("+res.status+").");
+  }
+  const result=data?.translation||data?.translatedText||data?.text;
+  if(typeof result!=="string"||!result.trim()){
+    throw new Error("The translation service returned an empty result.");
+  }
+  return result;
+}
+
+$("translateBtn").addEventListener("click",async()=>{
+  let text=$("sourceText").value.trim();
+  if(!text)return toast("Enter some text to translate.");
+  if(text.length>2000)return toast("Text exceeds 2000 characters limit.");
+  $("translateBtn").disabled=true;
+  $("translateBtn").textContent="Translating…";
+  $("resultStatus").textContent="Working";
+  try{
+    lastTranslation=await translateText(text,$("sourceLang").value,$("targetLang").value);
+    $("output").textContent=lastTranslation;
+    $("output").classList.remove("placeholder");
+    $("resultStatus").textContent="Complete";
+    toast("Translation complete.");
+  }catch(e){
+    $("resultStatus").textContent="Unavailable";
+    toast(e.message);
+  }finally{
+    $("translateBtn").disabled=false;
+    $("translateBtn").textContent="Translate text  →";
+  }
+});
+
 function getHistory(){try{return JSON.parse(localStorage.getItem("lafzHistory")||"[]")}catch(e){return[]}}
 function setHistory(items){localStorage.setItem("lafzHistory",JSON.stringify(items))}
-$("saveBtn").addEventListener("click",()=>{let original=$("sourceText").value.trim();if(!original||!lastTranslation)return toast("Translate text before saving.");let items=getHistory();items.unshift({id:Date.now().toString(),original,translation:lastTranslation,from:$("sourceLang").value,to:$("targetLang").value,date:new Date().toISOString()});setHistory(items.slice(0,100));renderHistory();toast("Translation saved.")});
-function renderHistory(){let items=getHistory(),q=$("historySearch").value.toLowerCase(),list=$("historyList");list.innerHTML="";items=items.filter(x=>(x.original+" "+x.translation+" "+x.from+" "+x.to).toLowerCase().includes(q));if(!items.length){list.innerHTML='<div class="empty">'+(getHistory().length?"No matching saved translations.":"No saved translations yet. Your saved items will appear here.")+'</div>';return}items.forEach(item=>{let row=document.createElement("div");row.className="history-item";let icon=document.createElement("div");icon.className="history-icon";icon.textContent="文";let body=document.createElement("div");body.className="history-content";let langs=document.createElement("div");langs.className="history-langs";langs.textContent=(LANGUAGES.find(x=>x[1]===item.from)?.[0]||"Auto")+" → "+(LANGUAGES.find(x=>x[1]===item.to)?.[0]||item.to);let preview=document.createElement("div");preview.className="history-preview";preview.textContent=item.original+"  →  "+item.translation;let date=document.createElement("div");date.className="history-date";date.textContent=new Date(item.date).toLocaleString();body.append(langs,preview,date);let actions=document.createElement("div");actions.className="history-actions";let open=document.createElement("button");open.className="icon-btn";open.textContent="Open";open.onclick=()=>{showPage("home");$("sourceText").value=item.original;$("sourceText").dispatchEvent(new Event("input"));$("sourceLang").value=item.from;$("targetLang").value=item.to;lastTranslation=item.translation;$("output").textContent=item.translation;$("output").classList.remove("placeholder");window.scrollTo({top:0,behavior:"smooth"})};let cp=document.createElement("button");cp.className="icon-btn";cp.textContent="Copy";cp.onclick=()=>copyText(item.translation);let del=document.createElement("button");del.className="icon-btn";del.textContent="Delete";del.onclick=()=>{setHistory(getHistory().filter(x=>x.id!==item.id));renderHistory();toast("Item deleted.")};actions.append(open,cp,del);row.append(icon,body,actions);list.append(row)})}
-$("historySearch").addEventListener("input",renderHistory);$("clearHistory").addEventListener("click",()=>{if(!getHistory().length)return toast("History is already empty.");if(confirm("Clear all saved translations?")){setHistory([]);renderHistory();toast("History cleared.")}});renderHistory();
-$("imageInput").addEventListener("change",e=>{let f=e.target.files[0];if(!f)return;if(!f.type.startsWith("image/"))return toast("Please choose an image file.");selectedImage=f;$("imagePreview").src=URL.createObjectURL(f);$("imagePreview").classList.remove("hidden");$("removeImage").classList.remove("hidden");$("replaceImage").classList.remove("hidden");$("uploadBox").classList.add("hidden")});
-$("replaceImage").addEventListener("click",()=>$("imageInput").click());$("removeImage").addEventListener("click",clearSelectedImage);
-function clearSelectedImage(){selectedImage=null;$("imageInput").value="";$("imagePreview").removeAttribute("src");$("imagePreview").classList.add("hidden");$("removeImage").classList.add("hidden");$("replaceImage").classList.add("hidden");$("uploadBox").classList.remove("hidden")}
-async function runOcr(alsoTranslate){if(!selectedImage)return toast("Choose an image first.");let fd=new FormData();fd.append("image",selectedImage);fd.append("language",$("ocrSource").value);$("extractBtn").disabled=$("imageTranslateBtn").disabled=true;try{let r=await fetch("/api/ocr",{method:"POST",body:fd});if(!r.ok)throw Error("OCR service returned an error ("+r.status+").");let d=await r.json();let extracted=d.text||d.extractedText;if(!extracted)throw Error("No text was detected in this image.");$("extractedText").value=extracted;if(alsoTranslate){let translated=await translateText(extracted,$("ocrSource").value,$("ocrTarget").value);$("imageOutput").textContent=translated}else toast("Text extracted.")}catch(e){toast(e.message.includes("Failed to fetch")?"Image OCR service is not connected yet.":e.message)}finally{$("extractBtn").disabled=$("imageTranslateBtn").disabled=false}}
-$("extractBtn").addEventListener("click",()=>runOcr(false));$("imageTranslateBtn").addEventListener("click",()=>runOcr(true));$("copyExtracted").addEventListener("click",()=>copyText($("extractedText").value));$("copyImageResult").addEventListener("click",()=>copyText($("imageOutput").textContent));$("clearImage").addEventListener("click",()=>{clearSelectedImage();$("extractedText").value="";$("imageOutput").textContent="Your image translation will appear here..."});
+$("saveBtn").addEventListener("click",()=>{
+  let original=$("sourceText").value.trim();
+  if(!original||!lastTranslation)return toast("Translate text before saving.");
+  let items=getHistory();
+  items.unshift({id:Date.now().toString(),original,translation:lastTranslation,from:$("sourceLang").value,to:$("targetLang").value,date:new Date().toISOString()});
+  setHistory(items.slice(0,100));
+  renderHistory();
+  toast("Translation saved.");
+});
+
+function renderHistory(){
+  let items=getHistory(),q=$("historySearch").value.toLowerCase(),list=$("historyList");
+  list.innerHTML="";
+  items=items.filter(x=>(x.original+" "+x.translation+" "+x.from+" "+x.to).toLowerCase().includes(q));
+  if(!items.length){
+    list.innerHTML='<div class="empty">'+(getHistory().length?"No matching saved translations.":"No saved translations yet. Your saved items will appear here.")+'</div>';
+    return;
+  }
+  items.forEach(item=>{
+    let row=document.createElement("div");
+    row.className="history-item";
+    let icon=document.createElement("div");
+    icon.className="history-icon";
+    icon.textContent="文";
+    let body=document.createElement("div");
+    body.className="history-content";
+    let langs=document.createElement("div");
+    langs.className="history-langs";
+    langs.textContent=(LANGUAGES.find(x=>x[1]===item.from)?.[0]||"Auto")+" → "+(LANGUAGES.find(x=>x[1]===item.to)?.[0]||item.to);
+    let preview=document.createElement("div");
+    preview.className="history-preview";
+    preview.textContent=item.original+"  →  "+item.translation;
+    let date=document.createElement("div");
+    date.className="history-date";
+    date.textContent=new Date(item.date).toLocaleString();
+    body.append(langs,preview,date);
+    let actions=document.createElement("div");
+    actions.className="history-actions";
+    let open=document.createElement("button");
+    open.className="icon-btn";
+    open.textContent="Open";
+    open.onclick=()=>{
+      showPage("home");
+      $("sourceText").value=item.original;
+      $("sourceText").dispatchEvent(new Event("input"));
+      $("sourceLang").value=item.from;
+      $("targetLang").value=item.to;
+      lastTranslation=item.translation;
+      $("output").textContent=item.translation;
+      $("output").classList.remove("placeholder");
+      window.scrollTo({top:0,behavior:"smooth"});
+    };
+    let cp=document.createElement("button");
+    cp.className="icon-btn";
+    cp.textContent="Copy";
+    cp.onclick=()=>copyText(item.translation);
+    let del=document.createElement("button");
+    del.className="icon-btn";
+    del.textContent="Delete";
+    del.onclick=()=>{
+      setHistory(getHistory().filter(x=>x.id!==item.id));
+      renderHistory();
+      toast("Item deleted.");
+    };
+    actions.append(open,cp,del);
+    row.append(icon,body,actions);
+    list.append(row);
+  });
+}
+$("historySearch").addEventListener("input",renderHistory);
+$("clearHistory").addEventListener("click",()=>{
+  if(!getHistory().length)return toast("History is already empty.");
+  if(confirm("Clear all saved translations?")){
+    setHistory([]);
+    renderHistory();
+    toast("History cleared.");
+  }
+});
+renderHistory();
+
+$("imageInput").addEventListener("change",e=>{
+  let f=e.target.files[0];
+  if(!f)return;
+  if(!f.type.startsWith("image/"))return toast("Please choose an image file.");
+  selectedImage=f;
+  $("imagePreview").src=URL.createObjectURL(f);
+  $("imagePreview").classList.remove("hidden");
+  $("removeImage").classList.remove("hidden");
+  $("replaceImage").classList.remove("hidden");
+  $("uploadBox").classList.add("hidden");
+});
+$("replaceImage").addEventListener("click",()=>$("imageInput").click());
+$("removeImage").addEventListener("click",clearSelectedImage);
+function clearSelectedImage(){
+  selectedImage=null;
+  $("imageInput").value="";
+  $("imagePreview").removeAttribute("src");
+  $("imagePreview").classList.add("hidden");
+  $("removeImage").classList.add("hidden");
+  $("replaceImage").classList.add("hidden");
+  $("uploadBox").classList.remove("hidden");
+}
+
+function resizeAndEncodeImage(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        let width=img.width;
+        let height=img.height;
+        const maxSide=1600;
+        if(width>maxSide||height>maxSide){
+          if(width>height){
+            height=Math.round((height*maxSide)/width);
+            width=maxSide;
+          }else{
+            width=Math.round((width*maxSide)/height);
+            height=maxSide;
+          }
+        }
+        const canvas=document.createElement("canvas");
+        canvas.width=width;
+        canvas.height=height;
+        const ctx=canvas.getContext("2d");
+        if(!ctx)return reject(new Error("Failed to process image canvas."));
+        ctx.drawImage(img,0,0,width,height);
+        const dataUrl=canvas.toDataURL("image/jpeg",0.85);
+        const base64=dataUrl.split(",")[1];
+        if(!base64)return reject(new Error("Failed to encode image to JPEG."));
+        resolve({imageBase64:base64,mimeType:"image/jpeg"});
+      };
+      img.onerror=()=>reject(new Error("Failed to load selected image."));
+      img.src=e.target.result;
+    };
+    reader.onerror=()=>reject(new Error("Failed to read image file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function runOcr(alsoTranslate){
+  if(!selectedImage)return toast("Choose an image first.");
+  $("extractBtn").disabled=$("imageTranslateBtn").disabled=true;
+  $("extractBtn").textContent="Processing…";
+  try{
+    const {imageBase64,mimeType}=await resizeAndEncodeImage(selectedImage);
+    const langCode=$("ocrSource").value;
+    const langName=getLanguageName(langCode);
+    let r=await fetch("/api/ocr",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({imageBase64,mimeType,language:langName})
+    });
+    let d=await r.json().catch(()=>null);
+    if(!r.ok)throw Error(d?.error||"OCR service returned an error ("+r.status+").");
+    let extracted=d?.text||d?.extractedText;
+    if(!extracted)throw Error("No text was detected in this image.");
+    $("extractedText").value=extracted;
+    if(alsoTranslate){
+      toast("Text extracted. Translating…");
+      let translated=await translateText(extracted,$("ocrSource").value,$("ocrTarget").value);
+      $("imageOutput").textContent=translated;
+      toast("Translation complete.");
+    }else{
+      toast("Text extracted.");
+    }
+  }catch(e){
+    toast(e.message);
+  }finally{
+    $("extractBtn").disabled=$("imageTranslateBtn").disabled=false;
+    $("extractBtn").textContent="Extract text";
+  }
+}
+
+$("extractBtn").addEventListener("click",()=>runOcr(false));
+$("imageTranslateBtn").addEventListener("click",()=>runOcr(true));
+$("copyExtracted").addEventListener("click",()=>copyText($("extractedText").value));
+$("copyImageResult").addEventListener("click",()=>copyText($("imageOutput").textContent));
+$("clearImage").addEventListener("click",()=>{
+  clearSelectedImage();
+  $("extractedText").value="";
+  $("imageOutput").textContent="Your image translation will appear here...";
+});
 </script>
 </body>
 </html>

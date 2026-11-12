@@ -1,112 +1,78 @@
 import 'dotenv/config';
 import express from 'express';
-import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
+import {
+  translateText,
+  ocrImage,
+  transcribeAudio,
+  setCorsHeaders,
+  handleApiError,
+  GEMINI_MODEL,
+} from './server/gemini.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = 3000;
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
-});
-
-function getGenAI() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-    return null;
-  }
-  return new GoogleGenAI({ apiKey });
-}
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '1mb' }));
 
+  // Support up to 10MB payloads for base64 image and audio
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // CORS and OPTIONS handling for /api routes
+  app.use('/api', (req, res, next) => {
+    setCorsHeaders(res);
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+    next();
+  });
+
+  // POST /api/translate
   app.post('/api/translate', async (req, res) => {
     try {
       const { text, source, target } = req.body ?? {};
-      if (typeof text !== 'string' || !text.trim()) {
-        return res.status(400).json({ error: 'Text is required.' });
-      }
-      if (typeof target !== 'string' || !target.trim()) {
-        return res.status(400).json({ error: 'Target language is required.' });
-      }
-
-      const ai = getGenAI();
-      if (!ai) {
-        return res.status(503).json({ error: 'Translation service is not connected yet.' });
-      }
-
-      const sourceLabel = source && source !== 'auto' ? source : 'auto-detected language';
-      const prompt = `Translate the following text from ${sourceLabel} to ${target}. Return only the translated text with no extra commentary, quotes, or explanations.\n\n${text}`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-      });
-
-      const translation = response.text?.trim() ?? '';
-      if (!translation) {
-        return res.status(502).json({ error: 'The translation service returned an empty result.' });
-      }
-
-      return res.json({ translation });
+      const translation = await translateText({ text, source, target });
+      return res.status(200).json({ translation });
     } catch (err) {
-      console.error('Translation error:', err);
-      return res.status(500).json({ error: 'Translation service encountered an error.' });
+      return handleApiError(err, res);
     }
   });
 
-  app.post('/api/ocr', upload.single('image'), async (req, res) => {
+  // POST /api/ocr
+  app.post('/api/ocr', async (req, res) => {
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: 'Image file is required.' });
-      }
-
-      const ai = getGenAI();
-      if (!ai) {
-        return res.status(503).json({ error: 'Image OCR service is not connected yet.' });
-      }
-
-      const language = typeof req.body?.language === 'string' ? req.body.language : 'auto';
-      const langHint = language && language !== 'auto' ? ` The text is primarily in ${language}.` : '';
-      const base64Data = req.file.buffer.toString('base64');
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: req.file.mimetype || 'image/png',
-                  data: base64Data,
-                },
-              },
-              {
-                text: `Extract all visible text from this image.${langHint} Return only the extracted text, preserving line breaks, with no extra commentary.`,
-              },
-            ],
-          },
-        ],
-      });
-
-      const text = response.text?.trim() ?? '';
-      if (!text) {
-        return res.status(422).json({ error: 'No text was detected in this image.' });
-      }
-
-      return res.json({ text });
+      const { imageBase64, mimeType, language } = req.body ?? {};
+      const text = await ocrImage({ imageBase64, mimeType, language });
+      return res.status(200).json({ text });
     } catch (err) {
-      console.error('OCR error:', err);
-      return res.status(500).json({ error: 'OCR service encountered an error.' });
+      return handleApiError(err, res);
     }
+  });
+
+  // POST /api/speech-to-text
+  app.post('/api/speech-to-text', async (req, res) => {
+    try {
+      const { audioBase64, mimeType, language } = req.body ?? {};
+      const text = await transcribeAudio({ audioBase64, mimeType, language });
+      return res.status(200).json({ text });
+    } catch (err) {
+      return handleApiError(err, res);
+    }
+  });
+
+  // Health/status endpoint
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      status: 'ok',
+      model: GEMINI_MODEL,
+      hasKey: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'),
+    });
   });
 
   if (process.env.NODE_ENV !== 'production') {
@@ -124,7 +90,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`LAFZ Translation server listening on http://0.0.0.0:${PORT}`);
+    console.log(`LAFZ Translation server listening on http://0.0.0.0:${PORT} (model: ${GEMINI_MODEL})`);
   });
 }
 
