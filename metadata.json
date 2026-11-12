@@ -1,0 +1,6 @@
+{
+  "name": "LAFZ Translation",
+  "description": "LAFZ Translation helps you translate text and images with a simple, clear and easy-to-use experience.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
